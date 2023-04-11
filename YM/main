@@ -1,19 +1,92 @@
-db = mysql.connector.connect(user='cd27503_orders', password='***',
-                              host='92.53.106.199',
-                              db='cd27503_orders')
+import mysql.connector
+import time
+import datetime
+import csv
+from datetime import date, timedelta, datetime
+from csv import DictReader
+import typer
+import pandas as pd
+import requests
+
+# Получение текущей даты и вычитание из нее 3 дней
+from_date1 = (date.today() - timedelta(days=11)).strftime('%Y-%m-%d %H:%M:%S')
+
+# Создание объекта datetime из полученной строки
+from_date = datetime.strptime(from_date1, '%Y-%m-%d %H:%M:%S')
+
+# Получение текущей даты и вычитание 3 дней
+to_date1 = date.today() - timedelta(days=1)
+
+# Создание объекта datetime из полученной даты
+to_date = datetime.combine(to_date1, datetime.min.time())
+
+db = mysql.connector.connect(user='cd27503_orders', password='Egt5GDMf',
+                             host='92.53.106.199', db='cd27503_orders')
 cur = db.cursor()
 
-# SQL-запрос для извлечения данных из столбца 'name'
-query = "SELECT * FROM matchorders limit 10"
+status_mapping = {
+    'Выполнен': 'PAID',
+    'Принят, ожидается оплата': 'IN_PROGRESS',
+    'Заявка на товар': 'SPAM',
+    'Отклонен': 'CANCELLED'
+}
 
-# Выполнение запроса
-cur.execute(query)
+with open('zakaz_to_YM.csv', mode='w', newline='') as file:
+    writer = csv.writer(file, delimiter=',')
+    headers = ['phones', 'client_ids', 'create_date_time', 'id', 'revenue', 'order_status']
+    writer.writerow(headers)
+    cur.execute(f'''SELECT PHONE, _ym_uid, DATE_CREATE, ORDER_ID, TOTAL_PRICE, STATUS FROM matchorders
+                    WHERE DATE(DATE_CREATE) >= "{from_date:%Y-%m-%d %H:%M:%S}" AND
+                          DATE(DATE_CREATE) <= "{to_date:%Y-%m-%d %H:%M:%S}"''')
+    for row in cur.fetchall():
+        if row[1]:  # Проверяем, что _ym_uid не пустой
 
-# Получение списка заголовков из метаданных запроса
-headers = [i[0] for i in cur.description]
+            # Получаем значение статуса из словаря, если оно там есть, иначе оставляем как есть
+            status = status_mapping.get(row[5], row[5])
 
-# Создание DataFrame из результата запроса и списка заголовков
-df = pd.DataFrame(cur.fetchall(), columns=headers)
+            # Создаем новую строку с преобразованной датой и измененными данными статуса
+            new_row = [row[0], row[1], row[2], row[3], row[4], status]
+            writer.writerow(new_row)
 
-# Вывод DataFrame в консоль
-print(df)
+# Закрываем файл zakaz_to_YM.csv
+file.close()
+
+
+
+from requests_toolbelt.multipart.encoder import MultipartEncoder
+
+# параметры запроса
+token = "y0_AgAAAAANw5swAAmfqgAAAADgEqpILMHLr8LUTFCrG1nWNGsDh-5CfQs"
+counter_id = "25762532"
+url = f"https://api-metrika.yandex.net/cdp/api/v1/counter/{counter_id}/data/simple_orders"
+merge_mode = "SAVE"
+delimiter_type = "COMMA"
+
+# считываем данные из CSV-файла
+with open("zakaz_to_YM.csv", "rb") as f:
+    csv_data = f.read()
+
+# формируем тело запроса
+multipart_data = MultipartEncoder(fields={
+    "file": ("zakaz_to_YM.csv", csv_data, "text/csv"),
+    "merge_mode": merge_mode,
+    "delimiter_type": delimiter_type,
+})
+headers = {
+    "Authorization": f"OAuth {token}",
+    "Content-Type": multipart_data.content_type,
+    "Content-Disposition": 'form-data; name="file"; filename="zakaz_to_YM.csv"',
+}
+
+# отправка POST-запроса
+response = requests.post(url, headers=headers, data=multipart_data)
+
+# проверка статуса ответа сервера
+if response.status_code == 200:
+    print("Данные успешно загружены на сервер Яндекс.Метрики.")
+else:
+    print(f"Ошибка при отправке данных: {response.status_code}")
+    print(response.text)
+
+
+
