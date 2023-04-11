@@ -1,1 +1,19 @@
-ff
+db = mysql.connector.connect(user='cd27503_orders', password='***',
+                              host='92.53.106.199',
+                              db='cd27503_orders')
+cur = db.cursor()
+
+# SQL-запрос для извлечения данных из столбца 'name'
+query = "SELECT * FROM matchorders limit 10"
+
+# Выполнение запроса
+cur.execute(query)
+
+# Получение списка заголовков из метаданных запроса
+headers = [i[0] for i in cur.description]
+
+# Создание DataFrame из результата запроса и списка заголовков
+df = pd.DataFrame(cur.fetchall(), columns=headers)
+
+# Вывод DataFrame в консоль
+print(df)
